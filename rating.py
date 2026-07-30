@@ -35,6 +35,10 @@ router = Router()
 
 
 def get_db():
+    # Автоматически создаем папку для базы данных (нужно для /data/ на Railway)
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     return sqlite3.connect(DB_PATH)
 
 
@@ -42,6 +46,7 @@ def init_db():
     conn = get_db()
     cursor = conn.cursor()
 
+    # 1. Создаем таблицы, если их еще нет
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
@@ -56,7 +61,19 @@ def init_db():
     )
     """)
 
-    # Автоматическая миграция колонок
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS deals (
+        deal_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        buyer_id INTEGER,
+        seller_id INTEGER,
+        gift TEXT,
+        buyer_table TEXT DEFAULT NULL,
+        status TEXT DEFAULT 'pending',
+        completed_at TIMESTAMP DEFAULT NULL
+    )
+    """)
+
+    # 2. Автоматическая миграция колонок для имеющихся баз
     cursor.execute("PRAGMA table_info(users)")
     u_columns = [col[1] for col in cursor.fetchall()]
 
@@ -81,27 +98,11 @@ def init_db():
             "ALTER TABLE deals ADD COLUMN buyer_table TEXT DEFAULT NULL"
         )
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS deals (
-        deal_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        buyer_id INTEGER,
-        seller_id INTEGER,
-        gift TEXT,
-        buyer_table TEXT DEFAULT NULL,
-        status TEXT DEFAULT 'pending',
-        completed_at TIMESTAMP DEFAULT NULL
-    )
-    """)
-
     conn.commit()
     conn.close()
 
 
 init_db()
-
-
-def get_db():
-    return sqlite3.connect("rating_bot.db")
 
 
 ######################################################
@@ -203,6 +204,7 @@ def get_room_empty_keyboard():
     keyboard.append([KeyboardButton(text="🔙 Назад")])
 
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
 
 def get_room_sitting_keyboard():
     return ReplyKeyboardMarkup(
@@ -707,9 +709,10 @@ async def btn_profile(message: Message, state: FSMContext):
         (user_id,),
     )
     user_row = cursor.fetchone()
+    conn.close()
 
     username = (
-        f"@{user_row[0]}" if (user_row and user_row[0]) else "Не устновлен"
+        f"@{user_row[0]}" if (user_row and user_row[0]) else "Не установлен"
     )
     first_name = user_row[1] if user_row and user_row[1] else "Без имени"
     current_table = (
