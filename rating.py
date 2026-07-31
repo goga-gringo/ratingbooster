@@ -331,9 +331,24 @@ async def send_single(
         )
         return
 
+    # 1. Получаем ID старых сообщений
     old_msg_ids = get_saved_msg_ids(user_id)
     new_msg_ids = []
 
+    # 2. Удаляем текстовое сообщение пользователя (которое он отправил кликом по кнопке)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    # 3. Удаляем предыдущие сообщения бота
+    for old_id in old_msg_ids:
+        try:
+            await message.bot.delete_message(chat_id=user_id, message_id=old_id)
+        except Exception:
+            pass
+
+    # 4. Отправляем новое сообщение
     main_markup = ikb if ikb else reply_markup
     msg = await message.answer(
         text, reply_markup=main_markup, parse_mode="Markdown"
@@ -346,17 +361,7 @@ async def send_single(
         )
         new_msg_ids.append(msg_footer.message_id)
 
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-    for old_id in old_msg_ids:
-        try:
-            await message.chat.delete_message(old_id)
-        except Exception:
-            pass
-
+    # 5. Сохраняем ID новых сообщений
     save_msg_ids(user_id, new_msg_ids)
 
 
