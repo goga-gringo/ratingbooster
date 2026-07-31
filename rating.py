@@ -521,7 +521,7 @@ async def refresh_user_room(
                     [
                         InlineKeyboardButton(
                             text="💬 Наша группа / Поддержка",
-                            url="https://t.me/your_group_link",
+                            url="https://t.me/+KXMR9c-XF4E3MWMy",
                         )
                     ]
                 ]
