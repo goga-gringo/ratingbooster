@@ -1573,7 +1573,7 @@ async def btn_rules(message: Message, state: FSMContext):
             [
                 InlineKeyboardButton(
                     text="💬 Наша группа / Обсуждения",
-                    url="https://t.me/your_group_link",
+                    url="https://t.me/+KXMR9c-XF4E3MWMy",
                 )
             ]
         ]
