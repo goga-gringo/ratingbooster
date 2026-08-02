@@ -29,6 +29,17 @@ DB_PATH = os.getenv("DB_PATH", "rating_bot.db")
 router = Router()
 
 
+def md_escape(text: str) -> str:
+    """
+    Экранирует символы _ и *, которые в Telegram parse_mode="Markdown"
+    трактуются как разметка (курсив/жирный). Без этого юзернейм или имя
+    вида "john_doe" может сломать отправку сообщения целиком.
+    """
+    if not text:
+        return text
+    return text.replace("_", "\\_").replace("*", "\\*")
+
+
 ######################################################
 # 2. ИНИЦИАЛИЗАЦИЯ И МИГРАЦИЯ БАЗЫ ДАННЫХ
 ######################################################
@@ -324,6 +335,7 @@ async def replace_screen(
     reply_markup: ReplyKeyboardMarkup = None,
     ikb: InlineKeyboardMarkup = None,
     user_message: Message = None,
+    parse_mode: str = "Markdown",
 ):
     """
     Единая точка "переключения страницы" для всего бота.
@@ -350,7 +362,7 @@ async def replace_screen(
     # 1. Отправляем новый "экран"
     main_markup = ikb if ikb else reply_markup
     msg = await bot.send_message(
-        user_id, text, reply_markup=main_markup, parse_mode="Markdown"
+        user_id, text, reply_markup=main_markup, parse_mode=parse_mode
     )
     new_msg_ids.append(msg.message_id)
 
@@ -433,6 +445,7 @@ async def refresh_user_room(
             if other_row and other_row[0]
             else (other_row[1] if other_row else f"ID: {other_id}")
         )
+        other_name = md_escape(other_name)
 
         card_text = ""
         ikb = None
@@ -625,6 +638,7 @@ async def refresh_user_room(
         reply_markup=kb,
         ikb=room_ikb,
         user_message=user_message,
+        parse_mode=None,
     )
 
 
@@ -721,10 +735,13 @@ async def btn_profile(message: Message, state: FSMContext):
     username = (
         f"@{user_row[0]}" if (user_row and user_row[0]) else "Не установлен"
     )
+    username = md_escape(username)
     first_name = user_row[1] if user_row and user_row[1] else "Без имени"
+    first_name = md_escape(first_name)
     current_table = (
         user_row[2] if (user_row and user_row[2]) else "❌ Не за столом"
     )
+    current_table = md_escape(current_table)
 
     matured_deals, hold_deals = get_user_stats(user_id)
     completed, disputes, cancelled = get_user_detailed_stats(user_id)
