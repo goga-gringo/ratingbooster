@@ -317,6 +317,69 @@ def is_user_banned(user_id: int) -> bool:
     return bool(row and row[0] == 1)
 
 
+async def replace_screen(
+    bot: Bot,
+    user_id: int,
+    text: str,
+    reply_markup: ReplyKeyboardMarkup = None,
+    ikb: InlineKeyboardMarkup = None,
+    user_message: Message = None,
+):
+    """
+    Единая точка "переключения страницы" для всего бота.
+    Логика простая, как переход между экранами:
+      1. Сначала показываем новый экран (чтобы в чате не было пустоты).
+      2. Затем ОДНИМ запросом удаляем и старый экран, и нажатие пользователя.
+    За одно переключение отправляется максимум 2 сообщения бота
+    (основной текст + подвал с кнопками "Назад"/меню), независимо от того,
+    сколько данных внутри — это и убирает "вереницу сообщений".
+    """
+    if is_user_banned(user_id):
+        if user_message:
+            try:
+                await user_message.answer(
+                    "⛔ Вы заблокированы за нарушение правил сервиса."
+                )
+            except Exception:
+                pass
+        return
+
+    old_msg_ids = get_saved_msg_ids(user_id)
+    new_msg_ids = []
+
+    # 1. Отправляем новый "экран"
+    main_markup = ikb if ikb else reply_markup
+    msg = await bot.send_message(
+        user_id, text, reply_markup=main_markup, parse_mode="Markdown"
+    )
+    new_msg_ids.append(msg.message_id)
+
+    if ikb and reply_markup:
+        msg_footer = await bot.send_message(
+            user_id, "👇 Выберите действие:", reply_markup=reply_markup
+        )
+        new_msg_ids.append(msg_footer.message_id)
+
+    # 2. Удаляем старый экран + сообщение пользователя ОДНИМ пакетным запросом
+    ids_to_delete = list(old_msg_ids)
+    if user_message:
+        ids_to_delete.append(user_message.message_id)
+
+    if ids_to_delete:
+        try:
+            await bot.delete_messages(chat_id=user_id, message_ids=ids_to_delete)
+        except Exception:
+            # Фолбэк для старых версий aiogram/Bot API без пакетного удаления
+            for mid in ids_to_delete:
+                try:
+                    await bot.delete_message(chat_id=user_id, message_id=mid)
+                except Exception:
+                    pass
+
+    # 3. Сохраняем ID нового экрана
+    save_msg_ids(user_id, new_msg_ids)
+
+
 async def send_single(
     message: Message,
     state: FSMContext,
@@ -330,39 +393,14 @@ async def send_single(
             "⛔ Вы заблокированы за нарушение правил сервиса."
         )
         return
-
-    # 1. Получаем ID старых сообщений
-    old_msg_ids = get_saved_msg_ids(user_id)
-    new_msg_ids = []
-
-    # 2. Удаляем текстовое сообщение пользователя (которое он отправил кликом по кнопке)
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-    # 3. Удаляем предыдущие сообщения бота
-    for old_id in old_msg_ids:
-        try:
-            await message.bot.delete_message(chat_id=user_id, message_id=old_id)
-        except Exception:
-            pass
-
-    # 4. Отправляем новое сообщение
-    main_markup = ikb if ikb else reply_markup
-    msg = await message.answer(
-        text, reply_markup=main_markup, parse_mode="Markdown"
+    await replace_screen(
+        message.bot,
+        user_id,
+        text,
+        reply_markup=reply_markup,
+        ikb=ikb,
+        user_message=message,
     )
-    new_msg_ids.append(msg.message_id)
-
-    if ikb and reply_markup:
-        msg_footer = await message.answer(
-            "👇 Нажмите «Назад» для возврата:", reply_markup=reply_markup
-        )
-        new_msg_ids.append(msg_footer.message_id)
-
-    # 5. Сохраняем ID новых сообщений
-    save_msg_ids(user_id, new_msg_ids)
 
 
 ######################################################
@@ -375,9 +413,6 @@ async def refresh_user_room(
 ):
     if is_user_banned(user_id):
         return
-
-    old_msg_ids = get_saved_msg_ids(user_id)
-    new_msg_ids = []
 
     active_deal = get_active_deal(user_id)
     if active_deal:
@@ -527,31 +562,14 @@ async def refresh_user_room(
                 ]
             )
 
-        msg_deal = await bot.send_message(
-            user_id, card_text, reply_markup=ikb, parse_mode="Markdown"
-        )
-        new_msg_ids.append(msg_deal.message_id)
-
-        msg_footer = await bot.send_message(
+        await replace_screen(
+            bot,
             user_id,
-            "👇 Нажмите «Назад» для возврата в меню:",
+            card_text,
             reply_markup=get_back_keyboard(),
+            ikb=ikb,
+            user_message=user_message,
         )
-        new_msg_ids.append(msg_footer.message_id)
-
-        if user_message:
-            try:
-                await user_message.delete()
-            except Exception:
-                pass
-
-        for old_id in old_msg_ids:
-            try:
-                await bot.delete_message(chat_id=user_id, message_id=old_id)
-            except Exception:
-                pass
-
-        save_msg_ids(user_id, new_msg_ids)
         return
 
     conn = get_db()
@@ -563,17 +581,13 @@ async def refresh_user_room(
     conn.close()
 
     header_text = "******************************************************\n\n                                     ОБЩИЙ СТОЛ:\n\n*******************************************************"
-    msg_header = await bot.send_message(user_id, header_text)
-    new_msg_ids.append(msg_header.message_id)
+    text_blocks = [header_text]
 
     is_sitting = False
+    offer_buttons = []
 
     if not sitters:
-        msg_empty = await bot.send_message(
-            user_id,
-            "                                            ПУСТО",
-        )
-        new_msg_ids.append(msg_empty.message_id)
+        text_blocks.append("                                            ПУСТО")
     else:
         for row in sitters:
             f_name, u_name, uid, table = row
@@ -585,45 +599,33 @@ async def refresh_user_room(
             rank_name, rank_emoji = get_rank_info(matured_deals)
 
             card_text = f"*************\n🟢 {f_name} ({display_user}) | Сделки: {matured_deals} | {rank_emoji} {rank_name} | {table}\n*************"
+            text_blocks.append(card_text)
+
             if uid != user_id:
-                ikb = InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            InlineKeyboardButton(
-                                text="🤝 СДЕЛКА",
-                                callback_data=f"offer_deal_{uid}",
-                            )
-                        ]
+                offer_buttons.append(
+                    [
+                        InlineKeyboardButton(
+                            text=f"🤝 Сделка — {f_name}",
+                            callback_data=f"offer_deal_{uid}",
+                        )
                     ]
                 )
-                msg_card = await bot.send_message(
-                    user_id, card_text, reply_markup=ikb
-                )
-            else:
-                msg_card = await bot.send_message(user_id, card_text)
-            new_msg_ids.append(msg_card.message_id)
+
+    full_text = "\n\n".join(text_blocks)
+    room_ikb = InlineKeyboardMarkup(inline_keyboard=offer_buttons) if offer_buttons else None
 
     kb = (
         get_room_sitting_keyboard() if is_sitting else get_room_empty_keyboard()
     )
-    msg_footer = await bot.send_message(
-        user_id, "👇 Выберите действие:", reply_markup=kb
+
+    await replace_screen(
+        bot,
+        user_id,
+        full_text,
+        reply_markup=kb,
+        ikb=room_ikb,
+        user_message=user_message,
     )
-    new_msg_ids.append(msg_footer.message_id)
-
-    if user_message:
-        try:
-            await user_message.delete()
-        except Exception:
-            pass
-
-    for old_id in old_msg_ids:
-        try:
-            await bot.delete_message(chat_id=user_id, message_id=old_id)
-        except Exception:
-            pass
-
-    save_msg_ids(user_id, new_msg_ids)
 
 
 ######################################################
