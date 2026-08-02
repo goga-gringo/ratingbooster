@@ -1200,6 +1200,7 @@ async def btn_history(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("history_page_"))
 async def process_history_page(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     user_id = callback.from_user.id
     target_page = int(callback.data.split("_")[2])
 
@@ -1214,16 +1215,19 @@ async def process_history_page(callback: CallbackQuery, state: FSMContext):
     except Exception:
         pass
 
-    await callback.answer()
+    
 
 
 @router.callback_query(F.data == "history_dispute")
 async def process_history_dispute(
     callback: CallbackQuery, state: FSMContext, bot: Bot
 ):
+    await callback.answer() # 👈 1. МГНОВЕННО ОТВЕЧАЕМ ТЕЛЕГРАМУ (Крутилка на кнопке гаснет)
+
     user_id = callback.from_user.id
     conn = get_db()
     cursor = conn.cursor()
+    # ... дальнейшая работа с БД
 
     cursor.execute(
         """
